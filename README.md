@@ -51,7 +51,8 @@ open "build/Worktree Cleaner.app"
 
 Requires macOS 14 or newer. Like Nightshift's app, the script uses Xcode's toolchain when
 Xcode is installed, because the Command Line Tools' `swift-package` on this Mac fails to
-load. Copy the app to /Applications if you want it in Launchpad.
+load. Copy the app to /Applications if you want it in Launchpad. The icon is drawn by
+`icon/make_icon.swift`; run `icon/make-icns.sh` to rebuild `Resources/AppIcon.icns`.
 
 Read-only text report (same scan, never removes anything):
 
