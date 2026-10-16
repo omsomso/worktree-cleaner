@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "source": "../AgentConfig",
+  "profiles": [
+    "general",
+    "git",
+    "software"
+  ],
+  "skills": []
+}
