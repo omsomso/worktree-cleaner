@@ -4,30 +4,34 @@ import WorktreeCore
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("recentHours") private var recentHours = 6
+    @AppStorage("showDetails") private var showDetails = false
+    @AppStorage("skipCleanConfirmation") private var skipCleanConfirmation = false
     @State private var confirmingRemoval = false
+    @State private var confirmingClean = false
     @State private var buildFolderTarget: Worktree?
 
     var body: some View {
         let cutoff = AppModel.recentCutoff(hours: recentHours)
-        VStack(spacing: 0) {
-            SummaryBar(cutoff: cutoff)
-            Divider()
-            if let result = model.result {
-                ScrollView {
-                    GroupsView(result: result, cutoff: cutoff, buildFolderTarget: $buildFolderTarget)
-                        .padding(16)
-                }
+        let safe = model.members(of: .safe, cutoff: cutoff)
+        Group {
+            if showDetails {
+                DetailsView(cutoff: cutoff, confirmingRemoval: $confirmingRemoval, buildFolderTarget: $buildFolderTarget)
             } else {
-                VStack(spacing: 8) {
-                    ProgressView()
-                    Text(model.progress.isEmpty ? "Scanning…" : model.progress).foregroundStyle(.secondary)
+                SimpleView(cutoff: cutoff, showDetails: $showDetails) {
+                    if skipCleanConfirmation { Task { await model.clean(cutoff: cutoff) } } else { confirmingClean = true }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Divider()
-            ActionBar(confirmingRemoval: $confirmingRemoval)
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("View", selection: $showDetails) {
+                    Text("Simple").tag(false)
+                    Text("Details").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .help("Switch between the simple screen and the full list")
+            }
             ToolbarItem {
                 Button { Task { await model.scan() } } label: { Label("Scan Again", systemImage: "arrow.clockwise") }
                     .keyboardShortcut("r")
@@ -36,6 +40,17 @@ struct ContentView: View {
             }
         }
         .task { if model.result == nil { await model.scan() } }
+        .confirmationDialog(
+            "Clean \(safe.count) finished worktree\(safe.count == 1 ? "" : "s")?",
+            isPresented: $confirmingClean,
+            titleVisibility: .visible
+        ) {
+            Button("Clean") { Task { await model.clean(cutoff: cutoff) } }
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text("Frees about \(Format.bytes(safe.reduce(0) { $0 + $1.totalBytes })). Their work is already merged. Each one is checked again first and skipped if anything changed. Branches and commits stay in git.")
+        }
+        .dialogSuppressionToggle(isSuppressed: $skipCleanConfirmation)
         .confirmationDialog(removalTitle, isPresented: $confirmingRemoval, titleVisibility: .visible) {
             Button("Remove \(model.selection.count == 1 ? "Worktree" : "\(model.selection.count) Worktrees")", role: .destructive) {
                 Task { await model.removeSelected() }
@@ -57,6 +72,205 @@ struct ContentView: View {
 
     private var removalTitle: String {
         model.selection.count == 1 ? "Remove 1 worktree?" : "Remove \(model.selection.count) worktrees?"
+    }
+}
+
+// The full list: every group, per-worktree facts, selection and removal.
+struct DetailsView: View {
+    @Environment(AppModel.self) private var model
+    let cutoff: Date
+    @Binding var confirmingRemoval: Bool
+    @Binding var buildFolderTarget: Worktree?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SummaryBar(cutoff: cutoff)
+            Divider()
+            if let result = model.result {
+                ScrollView {
+                    GroupsView(result: result, cutoff: cutoff, buildFolderTarget: $buildFolderTarget)
+                        .padding(16)
+                }
+            } else {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text(model.progress.isEmpty ? "Scanning…" : model.progress).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Divider()
+            ActionBar(confirmingRemoval: $confirmingRemoval)
+        }
+    }
+}
+
+// The default screen: how much can be freed and one Clean button. Details are a click away.
+struct SimpleView: View {
+    @Environment(AppModel.self) private var model
+    let cutoff: Date
+    @Binding var showDetails: Bool
+    let onClean: () -> Void
+
+    static let teal = Color(red: 0.08, green: 0.50, blue: 0.48)
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+            hero
+                .frame(maxWidth: 440)
+                .multilineTextAlignment(.center)
+                .animation(.smooth, value: stateKey)
+            Spacer(minLength: 24)
+            if model.result != nil {
+                Divider()
+                footer
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var safe: [Worktree] { model.members(of: .safe, cutoff: cutoff) }
+
+    private var stateKey: Int {
+        if model.working != nil { return 1 }
+        if model.lastClean != nil { return 2 }
+        if model.result == nil { return 0 }
+        return safe.isEmpty ? 3 : 4
+    }
+
+    @ViewBuilder private var hero: some View {
+        if model.working != nil {
+            VStack(spacing: 14) {
+                AppIcon(size: 88)
+                Text("Cleaning…").font(.title.weight(.semibold))
+                ProgressView(value: Double(model.workDone), total: Double(max(model.workTotal, 1)))
+                    .frame(width: 280)
+                    .tint(Self.teal)
+                Text(model.working ?? "").font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            }
+        } else if let summary = model.lastClean {
+            DoneView(summary: summary, showDetails: $showDetails)
+        } else if model.result == nil {
+            VStack(spacing: 14) {
+                AppIcon(size: 88)
+                Text("Checking your worktrees…").font(.title2.weight(.semibold))
+                ProgressView().controlSize(.small)
+                Text(model.progress).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            }
+        } else if safe.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 64))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Self.teal)
+                Text("All clean").font(.largeTitle.weight(.bold))
+                Text("No finished worktrees to remove right now.").foregroundStyle(.secondary)
+            }
+        } else {
+            let bytes = safe.reduce(0) { $0 + $1.totalBytes }
+            VStack(spacing: 10) {
+                AppIcon(size: 88)
+                Text(Format.bytes(bytes))
+                    .font(.system(size: 54, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text("can be freed from \(safe.count) finished worktree\(safe.count == 1 ? "" : "s")")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                Button(action: onClean) {
+                    Text("Clean").font(.title3.weight(.semibold)).frame(width: 170)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.extraLarge)
+                .tint(Self.teal)
+                .keyboardShortcut(.defaultAction)
+                .disabled(model.busy)
+                .padding(.top, 14)
+                Text("Their work is already merged. Build caches stay.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    // Free space, and a one-line note about anything that needs a look.
+    private var footer: some View {
+        HStack(spacing: 14) {
+            Label(model.freeBytes.map { "\(Format.bytes($0)) free" } ?? "—", systemImage: "internaldrive")
+                .foregroundStyle(.secondary)
+            if let note {
+                Text(note)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 8)
+            Button("Show Details") { showDetails = true }
+                .buttonStyle(.link)
+        }
+        .font(.callout)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
+    // Everything Clean leaves alone (recently used, unsaved or unmerged work, Claude's); Details says why.
+    private var note: String? {
+        let kept = [WorktreeGroup.recent, .keep, .managed].reduce(0) { $0 + model.members(of: $1, cutoff: cutoff).count }
+        var parts: [String] = []
+        if kept > 0 { parts.append("\(kept) other worktree\(kept == 1 ? "" : "s") kept") }
+        if let warnings = model.result?.warnings, !warnings.isEmpty { parts.append("\(warnings.count) warning\(warnings.count == 1 ? "" : "s")") }
+        return parts.isEmpty ? nil : "· " + parts.joined(separator: " · ")
+    }
+}
+
+struct DoneView: View {
+    @Environment(AppModel.self) private var model
+    let summary: CleanSummary
+    @Binding var showDetails: Bool
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 64))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, SimpleView.teal)
+            Text("Freed \(Format.bytes(summary.freed))")
+                .font(.system(size: 44, weight: .bold, design: .rounded))
+                .monospacedDigit()
+            Text(removedLine).font(.title3).foregroundStyle(.secondary)
+            if !summary.skipped.isEmpty {
+                VStack(spacing: 4) {
+                    Text("Skipped \(summary.skipped.count) because \(summary.skipped.count == 1 ? "it" : "they") changed since the scan:")
+                        .foregroundStyle(.orange)
+                    ForEach(summary.skipped.prefix(3), id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    if summary.skipped.count > 3 {
+                        Button("and \(summary.skipped.count - 3) more…") { showDetails = true }.buttonStyle(.link).font(.caption)
+                    }
+                }
+                .padding(.top, 4)
+            }
+            Button("Done") { model.lastClean = nil }
+                .controlSize(.large)
+                .padding(.top, 10)
+        }
+    }
+
+    private var removedLine: String {
+        var line = "\(summary.removed) worktree\(summary.removed == 1 ? "" : "s") removed"
+        if summary.prunedRecords > 0 { line += ", \(summary.prunedRecords) stale record\(summary.prunedRecords == 1 ? "" : "s") tidied" }
+        return line
+    }
+}
+
+struct AppIcon: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image(nsImage: NSApp.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
     }
 }
 
@@ -389,7 +603,8 @@ struct SettingsView: View {
     }
 }
 
-// Development aid: WORKTREE_CLEANER_SNAPSHOT=/path/file.png scans, renders the report area to a PNG, then quits.
+// Development aid: WORKTREE_CLEANER_SNAPSHOT=/path/name.png scans, then writes name.png (details)
+// and name-simple, -ready, -cleaning, -done and -allclean.png (the simple screen's states), then quits.
 @MainActor
 enum Snapshot {
     static func runIfRequested(_ model: AppModel) {
@@ -400,8 +615,8 @@ enum Snapshot {
             while model.scanning || model.result == nil { try? await Task.sleep(for: .milliseconds(200)) }
             guard let result = model.result else { return }
             let cutoff = AppModel.recentCutoff(hours: UserDefaults.standard.integer(forKey: "recentHours"))
-            if let first = model.members(of: .safe, cutoff: cutoff).first { model.selection = [first.id] }
-            let view = VStack(spacing: 0) {
+            let base = file.hasSuffix(".png") ? String(file.dropLast(4)) : file
+            render(VStack(spacing: 0) {
                 SummaryBar(cutoff: cutoff)
                 Divider()
                 GroupsView(result: result, cutoff: cutoff, buildFolderTarget: .constant(nil)).padding(16)
@@ -410,21 +625,46 @@ enum Snapshot {
             }
             .environment(model)
             .frame(width: 980)
-            .background(Color(nsColor: .windowBackgroundColor))
-            let renderer = ImageRenderer(content: view)
-            renderer.scale = 2
-            if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
-               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-                do {
-                    try png.write(to: URL(fileURLWithPath: file))
-                    FileHandle.standardError.write(Data("Snapshot written to \(file)\n".utf8))
-                } catch {
-                    FileHandle.standardError.write(Data("Snapshot not written: \(error.localizedDescription)\n".utf8))
-                }
-            } else {
-                FileHandle.standardError.write(Data("Snapshot not rendered\n".utf8))
-            }
+            .background(Color(nsColor: .windowBackgroundColor)), to: file)
+            render(simple(model, cutoff), to: base + "-simple.png")
+            render(simple(model, .distantFuture), to: base + "-ready.png")      // every merged, clean worktree counts as safe
+            render(simple(model, .distantPast), to: base + "-allclean.png")     // nothing counts as safe
+            model.working = "Removing 3 of 12: example-worktree"
+            model.workDone = 3
+            model.workTotal = 12
+            render(simple(model, cutoff), to: base + "-cleaning.png")
+            model.working = nil
+            model.lastClean = CleanSummary(attempted: 12, removed: 11, freed: 64_200_000_000,
+                                           skipped: ["example-worktree: it now has uncommitted or untracked files"], prunedRecords: 6)
+            render(simple(model, cutoff), to: base + "-done.png")
             NSApp.terminate(nil)
+        }
+    }
+
+    static func simple(_ model: AppModel, _ cutoff: Date) -> some View {
+        SimpleView(cutoff: cutoff, showDetails: .constant(false), onClean: {})
+            .environment(model)
+            .frame(width: 760, height: 560)
+    }
+
+    // Draws the view in an offscreen window so native controls render as they do on screen.
+    static func render(_ view: some View, to file: String) {
+        let host = NSHostingView(rootView: view)
+        let size = host.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.frame = NSRect(origin: .zero, size: size)
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            FileHandle.standardError.write(Data("Snapshot not rendered: \(file)\n".utf8))
+            return
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        do {
+            try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+            FileHandle.standardError.write(Data("Snapshot written to \(file)\n".utf8))
+        } catch {
+            FileHandle.standardError.write(Data("Snapshot not written: \(error.localizedDescription)\n".utf8))
         }
     }
 }

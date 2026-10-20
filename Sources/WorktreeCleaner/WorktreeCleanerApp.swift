@@ -32,10 +32,10 @@ struct WorktreeCleanerApp: App {
         Window("Worktree Cleaner", id: "main") {
             ContentView()
                 .environment(model)
-                .frame(minWidth: 760, minHeight: 520)
+                .frame(minWidth: 620, minHeight: 480)
                 .onAppear { Snapshot.runIfRequested(model) }
         }
-        .defaultSize(width: 980, height: 740)
+        .defaultSize(width: 780, height: 600)
         Settings {
             SettingsView()
         }
