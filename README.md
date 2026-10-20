@@ -4,7 +4,17 @@ A small macOS app that finds git worktrees whose work is already merged and remo
 ones you pick, so finished agent and feature checkouts stop eating disk space. Build caches
 stay: the shared compiler cache and each repository's main checkout are never touched.
 
-## What it shows
+## Simple screen
+
+The app opens on one screen: how much space can be freed, from how many finished
+worktrees, and a **Clean** button. Clean removes everything in the "Safe to remove" group
+below (each re-checked first, see Removing) and tidies git's records of folders that no
+longer exist, then shows how much was freed and anything skipped. The first time, it asks
+for confirmation; tick "Do not ask again" to skip that. The bottom line shows free disk
+space and how many other worktrees were left alone. Show Details, or the Simple / Details
+switch in the toolbar, opens the full list.
+
+## Details: what it shows
 
 It looks at every git repository directly inside the scan folders (default
 `~/CodexProjects`) and lists each repository's extra worktrees, wherever they live
@@ -27,7 +37,7 @@ each main checkout's `build/` for reference.
 
 ## Removing
 
-Tick worktrees (or Select All per group) and press Remove Selected…. After you confirm,
+In Details, tick worktrees (or Select All per group) and press Remove Selected…. After you confirm,
 each worktree is checked again just before it is deleted and skipped if anything changed
 (new commits, unsaved files, a program now using it). Removal runs
 `git worktree remove --force`: the force is needed because git refuses worktrees that
@@ -76,8 +86,10 @@ squash-merged, unmerged, changed, untracked, locked, missing, Claude app, in use
 submodules) and check the grouping and that removal refuses anything unsafe, including
 changes made after the scan.
 
-`WORKTREE_CLEANER_SNAPSHOT=/path/file.png` scans, renders the window's content to a PNG
-and quits (native buttons and checkboxes appear as placeholders).
+`WORKTREE_CLEANER_SNAPSHOT=/path/name.png` scans, renders the Details list to `name.png`
+and the simple screen's states to `name-simple.png`, `-ready`, `-cleaning`, `-done` and
+`-allclean.png` (the last three with sample numbers), then quits. Rendering happens in an
+offscreen window, so buttons draw as in an inactive window (grey rather than tinted).
 
 Sources: `Sources/WorktreeCore` (scanning, checks, removal, text report) and
 `Sources/WorktreeCleaner` (the SwiftUI app).
@@ -89,3 +101,8 @@ and a rendered snapshot were checked against a manual audit of the same machine:
 matched (Claude app pool, unmerged and dirty worktrees kept, stale `/tmp` records listed);
 a full scan with fetch took about 6 seconds. Removing worktrees and deleting build folders
 were exercised by the tests on throwaway repositories, not yet by clicking in the app.
+
+2026-10-20: added the simple screen with one-click Clean and the Simple / Details switch.
+Each state (ready, cleaning, done, all clean) was rendered and checked; the 9 tests still
+pass. Clean reuses the tested removal path; it was not clicked on screen against real
+worktrees.
