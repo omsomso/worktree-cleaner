@@ -62,13 +62,17 @@ public enum WorktreeScanner {
             }
             listed += entries.map { $0.worktree(repo) }
             if !entries.isEmpty, options.useGitHub {
+                progress?("Looking up pull requests for \(name)")
                 if let prs = await self.pullRequests(repo: path) { pullRequests[path] = prs }
             }
         }
 
-        progress?("Checking \(listed.count) worktrees")
+        let total = listed.count
+        progress?("Checking worktrees · 0 of \(total)")
         let directories = await workingDirectories()
-        var worktrees = await concurrentMap(listed, limit: 6) { await inspect($0, workingDirectories: directories) }
+        var worktrees = await concurrentMap(listed, limit: 6, onEach: { done in
+            progress?("Checking worktrees · \(done) of \(total)")
+        }) { await inspect($0, workingDirectories: directories) }
         for index in worktrees.indices {
             if let branch = worktrees[index].branch {
                 worktrees[index].pullRequest = pullRequests[worktrees[index].repo.path]?[branch]
@@ -243,7 +247,8 @@ extension WorktreeEntry {
 }
 
 // Runs `transform` on every item with at most `limit` running at once, keeping the input order.
-func concurrentMap<T: Sendable, R: Sendable>(_ items: [T], limit: Int, _ transform: @escaping @Sendable (T) async -> R) async -> [R] {
+// `onEach` gets the number finished so far, after each item.
+func concurrentMap<T: Sendable, R: Sendable>(_ items: [T], limit: Int, onEach: ((Int) -> Void)? = nil, _ transform: @escaping @Sendable (T) async -> R) async -> [R] {
     await withTaskGroup(of: (Int, R).self) { group in
         var results = [R?](repeating: nil, count: items.count)
         var next = 0
@@ -252,8 +257,11 @@ func concurrentMap<T: Sendable, R: Sendable>(_ items: [T], limit: Int, _ transfo
             group.addTask { (index, await transform(items[index])) }
             next += 1
         }
+        var finished = 0
         for await (index, value) in group {
             results[index] = value
+            finished += 1
+            onEach?(finished)
             if next < items.count {
                 let index = next
                 group.addTask { (index, await transform(items[index])) }

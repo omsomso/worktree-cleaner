@@ -33,10 +33,14 @@ struct ContentView: View {
                 .help("Switch between the simple screen and the full list")
             }
             ToolbarItem {
-                Button { Task { await model.scan() } } label: { Label("Scan Again", systemImage: "arrow.clockwise") }
-                    .keyboardShortcut("r")
-                    .disabled(model.busy)
-                    .help("Scan again (⌘R)")
+                if model.scanning {
+                    ProgressView().controlSize(.small).help("Refreshing…")
+                } else {
+                    Button { Task { await model.scan() } } label: { Label("Scan Again", systemImage: "arrow.clockwise") }
+                        .keyboardShortcut("r")
+                        .disabled(model.busy)
+                        .help("Scan again (⌘R)")
+                }
             }
         }
         .task { if model.result == nil { await model.scan() } }
@@ -119,7 +123,11 @@ struct SimpleView: View {
             hero
                 .frame(maxWidth: 440)
                 .multilineTextAlignment(.center)
+                .opacity(model.refreshing ? 0.35 : 1)
                 .animation(.smooth, value: stateKey)
+                .animation(.easeInOut(duration: 0.3), value: model.refreshing)
+            RefreshStatus(step: model.progress, visible: model.refreshing)
+                .padding(.top, 24)
             Spacer(minLength: 24)
             if model.result != nil {
                 Divider()
@@ -156,7 +164,7 @@ struct SimpleView: View {
                 AppIcon(size: 88)
                 Text("Checking your worktrees…").font(.title2.weight(.semibold))
                 ProgressView().controlSize(.small)
-                Text(model.progress).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                StepText(text: model.progress).font(.callout)
             }
         } else if safe.isEmpty {
             VStack(spacing: 12) {
@@ -221,6 +229,43 @@ struct SimpleView: View {
         if kept > 0 { parts.append("\(kept) other worktree\(kept == 1 ? "" : "s") kept") }
         if let warnings = model.result?.warnings, !warnings.isEmpty { parts.append("\(warnings.count) warning\(warnings.count == 1 ? "" : "s")") }
         return parts.isEmpty ? nil : "· " + parts.joined(separator: " · ")
+    }
+}
+
+// Shown under the simple screen while a rescan runs. Keeps its height when hidden so nothing jumps.
+struct RefreshStatus: View {
+    let step: String
+    let visible: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Refreshing…").font(.callout.weight(.medium))
+            }
+            StepText(text: step).font(.caption)
+        }
+        .opacity(visible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.3), value: visible)
+        .accessibilityHidden(!visible)
+    }
+}
+
+// The scan's current step; each new step slides up into place.
+struct StepText: View {
+    let text: String
+
+    var body: some View {
+        ZStack {
+            Text(text)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .id(text)
+                .transition(.push(from: .bottom))
+        }
+        .frame(height: 18)
+        .clipped()
+        .animation(.easeInOut(duration: 0.25), value: text)
     }
 }
 
@@ -289,7 +334,7 @@ struct SummaryBar: View {
             if model.scanning {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
-                    Text(model.progress).foregroundStyle(.secondary).lineLimit(1)
+                    StepText(text: model.progress)
                 }
             } else if let scanned = model.result?.scannedAt {
                 Text("Scanned \(scanned, style: .relative) ago").font(.caption).foregroundStyle(.secondary)
@@ -604,7 +649,7 @@ struct SettingsView: View {
 }
 
 // Development aid: WORKTREE_CLEANER_SNAPSHOT=/path/name.png scans, then writes name.png (details)
-// and name-simple, -ready, -cleaning, -done and -allclean.png (the simple screen's states), then quits.
+// and name-simple, -ready, -refreshing, -cleaning, -done and -allclean.png (the simple screen's states), then quits.
 @MainActor
 enum Snapshot {
     static func runIfRequested(_ model: AppModel) {
@@ -629,6 +674,11 @@ enum Snapshot {
             render(simple(model, cutoff), to: base + "-simple.png")
             render(simple(model, .distantFuture), to: base + "-ready.png")      // every merged, clean worktree counts as safe
             render(simple(model, .distantPast), to: base + "-allclean.png")     // nothing counts as safe
+            model.scanning = true
+            model.progress = "Checking worktrees · 5 of 20"
+            render(simple(model, .distantFuture), to: base + "-refreshing.png")
+            model.scanning = false
+            model.progress = ""
             model.working = "Removing 3 of 12: example-worktree"
             model.workDone = 3
             model.workTotal = 12

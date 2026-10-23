@@ -14,6 +14,11 @@ for confirmation; tick "Do not ask again" to skip that. The bottom line shows fr
 space and how many other worktrees were left alone. Show Details, or the Simple / Details
 switch in the toolbar, opens the full list.
 
+Scan Again (⌘R) turns into a spinner while it runs. On the simple screen the numbers fade,
+Clean is disabled, and "Refreshing…" appears underneath with the current step sliding in
+as it changes (reading or fetching a repository, looking up pull requests, "Checking
+worktrees · 5 of 20", measuring build caches).
+
 ## Details: what it shows
 
 It looks at every git repository directly inside the scan folders (default
@@ -88,7 +93,7 @@ changes made after the scan.
 
 `WORKTREE_CLEANER_SNAPSHOT=/path/name.png` scans, renders the Details list to `name.png`
 and the simple screen's states to `name-simple.png`, `-ready`, `-cleaning`, `-done` and
-`-allclean.png` (the last three with sample numbers), then quits. Rendering happens in an
+`-allclean.png`, plus `-refreshing.png` (cleaning, done and refreshing use sample state), then quits. Rendering happens in an
 offscreen window, so buttons draw as in an inactive window (grey rather than tinted).
 
 Sources: `Sources/WorktreeCore` (scanning, checks, removal, text report) and
@@ -106,3 +111,8 @@ were exercised by the tests on throwaway repositories, not yet by clicking in th
 Each state (ready, cleaning, done, all clean) was rendered and checked; the 9 tests still
 pass. Clean reuses the tested removal path; it was not clicked on screen against real
 worktrees.
+
+2026-10-23: refreshing shows a spinner in the toolbar and a "Refreshing…" line with the
+current scan step on the simple screen. The scanner now reports each worktree checked
+(covered by a new test; 10 tests pass) and the refreshing state was rendered and checked.
+The sliding animation itself was not watched on screen.

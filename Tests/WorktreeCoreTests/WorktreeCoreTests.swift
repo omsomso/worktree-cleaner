@@ -216,6 +216,27 @@ func isDone(_ outcome: Outcome) -> Bool {
     #expect(await fixture.scan().isEmpty)
 }
 
+@Test func reportsProgressForEachWorktree() async throws {
+    let fixture = try Fixture()
+    fixture.addWorktree("one", branch: "feat-one")
+    fixture.addWorktree("two", branch: "feat-two")
+    let messages = MessageLog()
+    _ = await WorktreeScanner.scan(ScanOptions(roots: [fixture.root], fetch: false, useGitHub: false)) { messages.add($0) }
+    let all = messages.all
+    #expect(all.contains("Reading project"))
+    #expect(all.contains("Checking worktrees · 0 of 2"))
+    #expect(all.contains("Checking worktrees · 1 of 2"))
+    #expect(all.contains("Checking worktrees · 2 of 2"))
+    #expect(all.last == "Measuring build caches")
+}
+
+final class MessageLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var messages: [String] = []
+    func add(_ message: String) { lock.lock(); messages.append(message); lock.unlock() }
+    var all: [String] { lock.lock(); defer { lock.unlock() }; return messages }
+}
+
 @Test func parsesPorcelainOutput() {
     let text = """
     worktree /repo
