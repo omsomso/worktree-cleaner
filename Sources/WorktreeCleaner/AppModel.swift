@@ -33,6 +33,7 @@ final class AppModel {
     static let defaults: [String: Any] = ["roots": "~/CodexProjects", "fetch": true, "useGitHub": true, "recentHours": 6]
 
     var busy: Bool { scanning || working != nil }
+    var refreshing: Bool { scanning && result != nil }
 
     static func recentCutoff(hours: Int) -> Date {
         Date().addingTimeInterval(-Double(hours) * 3600)
@@ -60,7 +61,8 @@ final class AppModel {
             .filter { !$0.isEmpty }
         let options = ScanOptions(roots: roots, fetch: defaults.bool(forKey: "fetch"), useGitHub: defaults.bool(forKey: "useGitHub"))
         let scanned = await WorktreeScanner.scan(options) { message in
-            Task { @MainActor in self.progress = message }
+            // The main queue keeps messages in order, so the step shown is always the latest.
+            DispatchQueue.main.async { self.progress = message }
         }
         result = scanned
         // A selection only survives a rescan while the worktree can still be removed.
