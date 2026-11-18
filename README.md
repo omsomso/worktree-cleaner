@@ -6,6 +6,12 @@ stay: the shared compiler cache and each repository's main checkout are never to
 
 Worktree Cleaner is open source under the MIT license (`LICENSE`).
 
+<img src="docs/screenshots/simple.png" alt="The simple screen: 540 MB can be freed from 3 finished worktrees" width="62%">
+
+<img src="docs/screenshots/details.png" alt="Details: worktrees grouped into safe to remove, used recently, Claude app, keep and missing" width="80%">
+
+*Screenshots made with the snapshot mode (see Development) on a demo folder of throwaway repositories.*
+
 ## Simple screen
 
 The app opens on one screen: how much space can be freed, from how many finished
