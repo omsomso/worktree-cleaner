@@ -4,6 +4,8 @@ A small macOS app that finds git worktrees whose work is already merged and remo
 ones you pick, so finished agent and feature checkouts stop eating disk space. Build caches
 stay: the shared compiler cache and each repository's main checkout are never touched.
 
+Worktree Cleaner is open source under the MIT license (`LICENSE`).
+
 ## Simple screen
 
 The app opens on one screen: how much space can be freed, from how many finished
